@@ -108,7 +108,7 @@ class AddUser(Resource):
             nom = __json["nom"]
             email = __json["email"]
             # mot_de_passe = __json["mot_de_passe"]
-            mot_de_passe=generate_password_hash=__json['mot_de_passe']
+            mot_de_passe = generate_password_hash=__json['mot_de_passe']
             new_utilisateur = Utilisateurs(nom=nom, email=email, mot_de_passe=mot_de_passe)
             db.session.add(new_utilisateur)
             db.session.commit()
