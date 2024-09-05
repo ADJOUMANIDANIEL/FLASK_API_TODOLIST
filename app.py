@@ -4,7 +4,7 @@ from flask_restx import Api, Namespace, Resource, fields
 from flask_marshmallow import Marshmallow
 import pymysql
 from datetime import datetime
-from sqlalchemy.orm import Session
+# from sqlalchemy.orm import Session
 from werkzeug.security import generate_password_hash
 # from app import db, api, ns_taches  
 # from app.models import Tache, Utilisateur  
@@ -68,9 +68,9 @@ taches_schema = TacheSchema(many=True)  # Quand on veut afficher plusieures tach
 class Historiques(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     action = db.Column(db.String(20), nullable=False)
-    date_creation = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    date_action = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     utilisateur_id = db.Column(db.Integer, db.ForeignKey('utilisateurs.id'), nullable=False)
-    tache_id = db.Column(db.Integer, db.ForeignKey('tahes.id'), nullable=False)
+    tache_id = db.Column(db.Integer, db.ForeignKey('taches.id'), nullable=False)
     def __init__(self, action,  date_action,utilisateur_id, tache_id):
         self.action = action
         self.date_action = date_action
