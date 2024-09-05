@@ -4,6 +4,7 @@ from flask_restx import Api, Namespace, Resource, fields
 from flask_marshmallow import Marshmallow
 import pymysql
 from datetime import datetime
+from sqlalchemy.orm import Session
 from werkzeug.security import generate_password_hash
 # from app import db, api, ns_taches  
 # from app.models import Tache, Utilisateur  
@@ -24,8 +25,8 @@ with app.app_context():
 # 1- Création du modèle de la table utilisateurs
 class Utilisateurs(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    nom = db.Column(db.String(20), nullable=False)
-    email = db.Column(db.String(20),unique=True, nullable=False)
+    nom = db.Column(db.String(50), nullable=False)
+    email = db.Column(db.String(50),unique=True, nullable=False)
     mot_de_passe = db.Column(db.String(255), nullable=False)
     def __init__(self, nom, email, mot_de_passe):
         self.nom = nom
@@ -66,20 +67,19 @@ taches_schema = TacheSchema(many=True)  # Quand on veut afficher plusieures tach
 # 3- Création du modèle de la table historiques
 class Historiques(db.Model):
     id = db.Column(db.Integer, primary_key=True)
+    action = db.Column(db.String(20), nullable=False)
+    date_creation = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     utilisateur_id = db.Column(db.Integer, db.ForeignKey('utilisateurs.id'), nullable=False)
     tache_id = db.Column(db.Integer, db.ForeignKey('tahes.id'), nullable=False)
-    action = db.Column(db.String(20), nullable=False)
-    date_action = db.Column(db.DateTime, nullable=False)
-    def __init__(self, action, utilisateur_id, tache_id, date_action,):
+    def __init__(self, action,  date_action,utilisateur_id, tache_id):
         self.action = action
+        self.date_action = date_action
         self.utilisateur_id = utilisateur_id
         self.tache_id = tache_id
-        self.date_action = date_action
-
 # Création du modèle d'affichage des données 
 class HistoSchema(ma.Schema):
     class Meta:
-        fields = ("id", "action", "utilisateur_id","tache_id","date_action")
+        fields = ("id", "action", "date_action", "utilisateur_id","tache_id")
 # Instanciation du modèle d'affichage
 historique_schema = HistoSchema(many=False)  # Quand on veut afficher un seul historiques
 historiques_schema = HistoSchema(many=True)  # Quand on veut afficher plusieurs historiques
@@ -107,9 +107,13 @@ class AddUser(Resource):
             __json = request.json
             nom = __json["nom"]
             email = __json["email"]
-            # mot_de_passe = __json["mot_de_passe"]
-            mot_de_passe = generate_password_hash=__json['mot_de_passe']
-            new_utilisateur = Utilisateurs(nom=nom, email=email, mot_de_passe=mot_de_passe)
+            mot_de_passe = __json["mot_de_passe"]
+            # Vérifier si l'adresse e-mail existe déjà
+            existing_user = Utilisateurs.query.filter_by(email=email).first()
+            if existing_user:
+                return jsonify({"message": "L'adresse e-mail est déjà utilisée"}), 400
+            hashed_password = generate_password_hash(mot_de_passe)
+            new_utilisateur = Utilisateurs(nom=nom, email=email, mot_de_passe=hashed_password)
             db.session.add(new_utilisateur)
             db.session.commit()
             return jsonify(f"Utilisateur ajouté avec succès")
@@ -184,20 +188,19 @@ class AddTache(Resource):
             statut = __json["statut"]
             date_creation = __json["date_creation"]
             date_mise_a_jour = __json["date_mise_a_jour"]
-            utilisateur_id=utilisateur_id
-            # print(f"Received data: {__json}")  # Log pour vérifier les données reçues
-            # Vérifier si l'utilisateur existe
-            # utilisateur = Utilisateur.query.get(utilisateur_id)
-            # if not utilisateur:
-            #     return jsonify({'message': 'Utilisateur non trouvé'}), 404
-            # print(f"Utilisateur trouvé: {utilisateur}")  # Log pour vérifier l'utilisateur trouvé
+            utilisateur_id = __json["utilisateur_id"]
+            # Vérifiez si l'utilisateur existe
+            utilisateur = Utilisateurs.query.get(utilisateur_id)
+            if not utilisateur:
+                return jsonify({"message": "L'utilisateur n'existe pas"}), 404
             new_tache = Taches(titre=titre, description=description, statut=statut,date_creation=date_creation,
             date_mise_a_jour=date_mise_a_jour,utilisateur_id=utilisateur_id)
             db.session.add(new_tache)
             db.session.commit()
             return jsonify(f"Tache ajouté avec succès")
         except Exception as e:
-            return jsonify("Mauvaise requête d'insertion de tache")
+            return jsonify({"message": "Mauvaise requête d'insertion de tâche", "error": str(e)}), 400
+            # return jsonify("Mauvaise requête d'insertion de tache")
 
 # Route pour afficher une seule tache
 @ns_taches.route('/afficher_tache_ID/<int:id>')
@@ -252,10 +255,10 @@ api.add_namespace(ns_historiques, path='/historique')
 # Modèle pour les historiques
 historique_model = api.model('Historique', {
     'id': fields.Integer(readOnly=True, description='Identifiant unique de historique'),
-    'tache_id': fields.Integer(required=True, description='Identifiant de la tache'),
-    'utilisateur_id': fields.Integer(required=True, description='Identifiant de l\'utilisateur'),
     'action': fields.String(required=True, description='ACtion faite sur la tache'),
-    'date_action': fields.DateTime(required=True, description='Date création historique')
+    'date_action': fields.DateTime(required=True, description='Date création historique'),
+    'utilisateur_id': fields.Integer(required=True, description='Identifiant de l\'utilisateur'),
+    'tache_id': fields.Integer(required=True, description='Identifiant de la tache')
 })
 
 # Route pour ahouter une historique
@@ -267,13 +270,50 @@ class AddHistorique(Resource):
             __json = request.json
             action = __json["action"]
             date_action = __json["date_action"]
-            new_histo = Historiques(action=action, date_action=date_action)
+            utilisateur_id=__json["utilisateur_id"]
+            # Vérifiez si l'utilisateur existe
+            utilisateur = Utilisateurs.query.get(utilisateur_id)
+            if not utilisateur:
+                return jsonify({"message": "L'utilisateur n'existe pas"}), 404
+            tache_id =__json["tache_id"]
+            # Vérifiez si la tache existe
+            tache = Taches.query.get(tache_id)
+            if not tache:
+                return jsonify({"message": "La tache n'existe pas"}), 404
+            new_histo = Historiques(action=action, date_action=date_action, utilisateur_id=utilisateur_id, tache_id=tache_id)
             db.session.add(new_histo)
             db.session.commit()
             return jsonify(f"Historique ajoutée avec succès")
         except Exception as e:
-            return jsonify("Mauvaise requête d'insertion de historique")
+            # return jsonify("Mauvaise requête d'insertion de historique")
+            return jsonify({"message": "Mauvaise requête d'insertion de tâche", "error": str(e)}), 400
 
+# # Route pour ajouter une historique
+# @ns_historiques.route('/ajouter')
+# class AddHistorique(Resource):
+#     @ns_historiques.expect(historique_model, validate=True)
+#     def post(self):
+#         try:
+#             __json = request.json
+#             action = __json["action"]
+#             date_action = __json["date_action"]
+#             utilisateur_id = __json["utilisateur_id"]
+#             # Vérifiez si l'utilisateur existe
+#             utilisateur = db.session.get(Utilisateurs, utilisateur_id)
+#             if not utilisateur:
+#                 return jsonify({"message": "L'utilisateur n'existe pas"}), 404
+#             tache_id = __json["tache_id"]
+#             # Vérifiez si la tache existe
+#             tache = db.session.get(Taches, tache_id)
+#             if not tache:
+#                 return jsonify({"message": "La tache n'existe pas"}), 404
+#             new_histo = Historiques(action=action, date_action=date_action, utilisateur_id=utilisateur_id, tache_id=tache_id)
+#             db.session.add(new_histo)
+#             db.session.commit()
+#             return jsonify({"message": "Historique ajoutée avec succès"})
+#         except Exception as e:
+#             return jsonify({"message": "Mauvaise requête d'insertion de tâche", "error": str(e)}), 400
+        
 # Route pour afficher toutes les historiques
 @ns_historiques.route('/')
 class GetHistoriques(Resource):
